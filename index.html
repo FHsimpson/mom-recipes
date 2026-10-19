@@ -217,7 +217,7 @@ const KNOWN_INGREDIENTS = `물 소금 설탕 흑설탕 간장 고춧가루 고�
   양파 대파 쪽파 파 감자 고구마 당근 두부 계란 달걀 매실액 매실청 물엿 올리고당 조청 꿀 맛술 미림 청주 소주 맛간장 굴소스 액젓 새우젓 육수
   식용유 올리브유 버터 우유 생크림 밀가루 전분 녹말 부침가루 튀김가루 빵가루 청양고추 고추 홍고추 풋고추 꽈리고추 애호박 호박 무 배추 김치
   버섯 표고버섯 느타리버섯 팽이버섯 새송이 양송이 콩나물 숙주 시금치 부추 깻잎 양배추 상추 오이 가지 브로콜리 파프리카 피망 미나리 쑥갓 연근 우엉 도라지 고사리
-  돼지고기 소고기 쇠고기 닭고기 닭 오리 삼겹살 목살 차돌박이 다짐육 베이컨 햄 스팸 소시지 어묵 맛살 참치 멸치 새우 오징어 낙지 쭈꾸미 조개 바지락 홍합 북어 황태 김 미역 다시마
+  돼지고기 소고기 쇠고기 닭고기 닭 오리 삼겹살 목살 차돌박이 다짐육 베이컨 햄 스팸 소시지 어묵 맛살 참치 멸치 새우 고등어 갈치 꽁치 삼치 연어 동태 명태 코다리 대구 조기 굴비 장어 고구마줄기 오징어 낙지 쭈꾸미 조개 바지락 홍합 북어 황태 김 미역 다시마
   치즈 쌀 찹쌀 밥 떡 당면 소면 라면 레몬 사과 배 대추 잣 호두 땅콩 견과류 물엿 카레가루 케첩 마요네즈 머스타드 와사비 연두 다시다 미원 쯔유`.split(/\s+/).filter(Boolean);
 // 다음 단어와 붙여서 한 재료로 보는 꾸밈말 (예: 다진 마늘, 양조 간장)
 const INGREDIENT_MODIFIERS = '다진 깐 생 신 묵은 국산 냉동 통 굵은 고운 흰 맛 양조 진 국 조선 썬 채썬 마른 말린 건 저염 무염 갈은 빻은 삶은 볶은 구운 데친 불린 손질한 익은 작은 큰'.split(' ');
@@ -340,7 +340,9 @@ const ING_LOOSE = new RegExp(`^(.+?)${QTY}\\s*(.*)$`);
 const ING_FIRST = new RegExp(`^${QTY}\\s*([^\\s]*)\\s+(.+)$`);
 const VAGUE = /^(.*?)[\s:：]*(약간|조금|적당량|적당히|소량|기호에\s*맞게|기호껏|취향껏|넉넉히|한\s*꼬집|한\s*줌|조금씩|필요한\s*만큼)$/;
 const KNUM = { 한: 1, 두: 2, 세: 3, 네: 4, 다섯: 5 };
-const KNUM_RE = /(^|\s)(한|두|세|네|다섯)\s*(줌|꼬집|큰술|작은술|숟가락|스푼|컵|개|모|단|봉지|알|쪽|장|마리|공기|포기)/g;
+const KNUM_RE = /(^|\s|~)(한|두|세|네|다섯)\s*(줌|꼬집|큰술|작은술|숟가락|스푼|컵|개|모|단|봉지|알|쪽|장|마리|공기|포기|바가지|주먹|움큼|덩이|토막|팩|통|대)/g;
+// "1개~2개" → "1~2개"
+const sameUnitRange = s => s.replace(/(\d+(?:\.\d+)?)\s*([가-힣]{1,3})\s*~\s*(\d+(?:\.\d+)?)\s*\2/g, '$1~$3$2');
 const STEP_NUM = /^\s*(?:(?:step|스텝)\s*)?(\d{1,2})\s*(?:[.)．、:]|단계|번째?|\s)\s*|^\s*[①-⑳❶-❿⑴-⒇]\s*/i;
 const BULLET = /^\s*(?:[-–•·*▪■□▶▷►✔✓☑●○◦→]+|\d{1,2}\s*[.)]\s+)\s*/;
 const H_ING_MAIN = /^(재료|주\s*재료|부\s*재료|기본\s*재료|필수\s*재료|선택\s*재료|준비\s*재료|필요한\s*재료|재료\s*준비|ingredients?)$/i;
@@ -397,7 +399,7 @@ function normAmount(a) { return a.replace(/\s*과\s*/, ' ').replace(/\s*[~∼-]\
 function parseIngredient(raw) {
   let s = raw.replace(BULLET, '').replace(/\s+/g, ' ').trim();
   if (!s) return null;
-  s = s.replace(KNUM_RE, (m, p, w, u) => `${p}${KNUM[w]}${u}`);
+  s = sameUnitRange(s.replace(KNUM_RE, (m, p, w, u) => `${p}${KNUM[w]}${u}`)).replace(/\((약간|조금|적당량|적당히|소량|취향껏)\)$/, ' $1');
   const v = s.match(VAGUE);
   if (v && v[1].trim()) return { name: v[1].trim(), amount: '', unit: v[2].replace(/\s+/g, ' ') };
   let m = s.match(ING_STRICT) || (/^(약\s*)?\d/.test(s) && s.match(ING_FIRST) ? null : s.match(ING_LOOSE));
@@ -411,16 +413,16 @@ function parseIngredient(raw) {
   if (m) return { name: m[4].trim(), amount: (m[1] ? '약 ' : '') + normAmount(m[2]), unit: m[3] };
   return { name: s, amount: '', unit: '' };
 }
-function looksIngredient(line) {
+function looksIngredient(line, spaced = true) {
   const s = line.replace(BULLET, '').trim();
   if (s.length > 45 || isStepLike(s)) return false;
-  return new RegExp(QTY + '\\s*[a-zA-Z가-힣]{0,4}').test(s) || VAGUE.test(s) || s.includes(',') || expandSpaced(s).length > 1;
+  return new RegExp(QTY + '\\s*[a-zA-Z가-힣]{0,4}').test(s) || VAGUE.test(s) || s.includes(',') || (spaced && expandSpaced(s).length > 1);
 }
 // 띄어쓰기로만 이어진 재료 나누기
 //  "물 고춧가루 양조간장 매실액"      → 물 / 고춧가루 / 양조간장 / 매실액
 //  "물 1컵 고춧가루 2큰술 간장 1큰술" → 양이 붙은 재료마다 나눔
 //  "다진 마늘 1큰술", "돼지고기 앞다리살 600g" → 한 재료로 유지
-const isKnownIng = w => KNOWN_INGREDIENTS.some(k => w === k || (k.length >= 2 && w.endsWith(k)));
+const isKnownIng = w => (w = w.replace(/[(（].*$/, ''), KNOWN_INGREDIENTS.some(k => w === k || (k.length >= 2 && w.endsWith(k))));
 function splitNames(name) {
   const raw = name.split(/\s+/).filter(Boolean), words = [];
   for (let i = 0; i < raw.length; i++) {
@@ -432,8 +434,8 @@ function splitNames(name) {
   return known === words.length || (words.length >= 3 && known >= words.length - 1) ? words : [name];
 }
 function expandSpaced(item) {
-  const s = item.replace(BULLET, '').replace(KNUM_RE, (m, p, w, u) => `${p}${KNUM[w]}${u}`).replace(/\s+/g, ' ').trim();
-  if (!s || /[(（\[]/.test(s)) return [item];
+  const s = sameUnitRange(item.replace(BULLET, '').replace(KNUM_RE, (m, p, w, u) => `${p}${KNUM[w]}${u}`)).replace(/\s+/g, ' ').trim();
+  if (!s || /[(（\[][^)）\]]*\s/.test(s)) return [item];   // 괄호 안에 띄어쓰기가 있으면(예: "(약 30g)") 나누지 않음
   const re = new RegExp(`(?:약간|조금|적당량|적당히|소량|취향껏|${QTY}\\s*[a-zA-Z가-힣]{0,4})(?=\\s|$)`, 'g');
   const pieces = []; let last = 0, m;
   while ((m = re.exec(s))) {
@@ -450,6 +452,25 @@ function expandSpaced(item) {
   }
   return out.length > 1 ? out : [item];
 }
+// 재료 목록엔 양이 없고 요리 과정에 "물을 700ml / 고춧가루 5큰술"처럼 적혀 있으면, 그 양을 재료 칸에 채워 넣기
+const MEASURE_WORDS = { 종이컵: '종이컵', 티스푼: '티스푼', 밥숟가락: '밥숟가락', 숟가락: '숟가락', 스푼: '스푼', 큰술: '큰술', 작은술: '작은술' };
+function fillAmountsFromSteps(ingredients, steps) {
+  const text = steps.join(' / ');
+  const escRe = t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  for (const ing of ingredients) {
+    if (ing.section != null || ing.amount || !ing.name) continue;
+    const names = [ing.name, ing.name.replace(/\s+/g, ''), ing.name.replace(/액$/, '청'), ing.name.replace(/청$/, '액')];   // 매실액 ↔ 매실청
+    for (const n of names) {
+      const re = new RegExp(`${escRe(n)}\\s*(?:을|를|은|는|도)?\\s*(종이컵|티스푼|밥숟가락|숟가락|스푼)?\\s*${QTY}\\s*([a-zA-Z가-힣]{0,3})`);
+      const m = text.match(re);
+      if (!m || !m[4]) continue;
+      ing.amount = (m[2] ? '약 ' : '') + normAmount(m[3]);
+      ing.unit = m[1] && /^(개|컵|번|스푼)?$/.test(m[4]) ? MEASURE_WORDS[m[1]] : m[4];
+      ing.fromSteps = true;
+      break;
+    }
+  }
+}
 function guessCategory(title) { for (const [c, re] of CATEGORY_HINTS) if (re.test(title)) return c; return ''; }
 
 function parseRecipeText(text) {
@@ -457,15 +478,18 @@ function parseRecipeText(text) {
   let section = null, stepsNumbered = false, sawHeader = false;
   const lines = String(text || '').replace(/ /g, ' ').split(/\r?\n/);
   const pushIng = line => splitItems(line).flatMap(expandSpaced).forEach(it => { const p = parseIngredient(it); if (p && p.name) out.ingredients.push(p); });
+  let prevBlank = false;
   const pushStep = line => {
     const numbered = STEP_NUM.test(line);
     const s = line.replace(STEP_NUM, '').replace(BULLET, '').trim(); if (!s) return;
     if (numbered) stepsNumbered = true;
+    if (!numbered && stepsNumbered && prevBlank) { out.tip.push(s); return; }   // 번호 단계 뒤 빈 줄 다음의 번호 없는 문장 → 팁
     if (!numbered && stepsNumbered && out.steps.length && !isStepLike(s)) out.steps[out.steps.length - 1] += ' ' + s;
     else out.steps.push(s);
   };
   for (const raw of lines) {
-    const line = raw.trim(); if (!line) continue;
+    const line = raw.trim(); if (!line) { prevBlank = true; continue; }
+    const wasBlank = prevBlank; prevBlank = false;
     const h = detectHeader(line);
     if (h) {
       sawHeader = true;
@@ -485,18 +509,20 @@ function parseRecipeText(text) {
       }
       const SV = /[(\[]?\s*(\d+)\s*(?:[~-]\s*\d+\s*)?인분\s*(?:기준)?\s*[)\]]?/;
       const noSrv = line.replace(SV, ' ').trim();
-      if (!out.title && !section && noSrv.length <= 40 && !looksIngredient(noSrv) && !isStepLike(noSrv)) {
+      if (!out.title && !section && noSrv.length <= 40 && !looksIngredient(noSrv, false) && !isStepLike(noSrv)) {
         const sv = line.match(SV); if (sv && !out.servings) out.servings = Number(sv[1]);
         out.title = cleanHeader(noSrv.replace(/^(제목|요리명|메뉴)\s*[:：]\s*/, '')) || noSrv; continue;
       }
     }
     if (section === 'ing') { if (isStepLike(line) && !looksIngredient(line)) { section = 'step'; pushStep(line); } else pushIng(line); }
-    else if (section === 'step') pushStep(line);
+    else if (section === 'step') { prevBlank = wasBlank; pushStep(line); prevBlank = false; }
     else if (section === 'tip') out.tip.push(line.replace(BULLET, ''));
     else if (isStepLike(line)) { section = sawHeader ? section : 'step'; pushStep(line); }   // 제목 없이 바로 과정이 나오는 글
     else if (looksIngredient(line)) pushIng(line);
     else out.tip.push(line.replace(BULLET, ''));
   }
+  fillAmountsFromSteps(out.ingredients, out.steps);
+  out.ingredients.forEach(i => delete i.fromSteps);
   return { ...out, tip: out.tip.join('\n'), category: guessCategory(out.title) };
 }
 
