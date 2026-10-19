@@ -190,7 +190,7 @@ textarea:focus,input:focus,select:focus{border-color:var(--accent)}
 // Firebase 콘솔 > 프로젝트 설정 > 내 앱 > "SDK 설정 및 구성"의 firebaseConfig 내용을 그대로 붙여넣으세요.
 // 비워두면 '체험 모드'로 동작합니다(이 기기에만 저장, 가족과 공유 안 됨).
 const FIREBASE_CONFIG = {
-apiKey: "AIzaSyBlGevvDfhuCXP_u-e6Jir8B3mRbVxNWJA",
+  apiKey: "AIzaSyBlGevvDfhuCXP_u-e6Jir8B3mRbVxNWJA",
   authDomain: "mom-recipes-7a895.firebaseapp.com",
   projectId: "mom-recipes-7a895",
   storageBucket: "mom-recipes-7a895.firebasestorage.app",
@@ -210,6 +210,17 @@ const CATEGORY_HINTS = [
   ['메인요리', /구이|찜$|찜\s|불고기|갈비|수육|보쌈|튀김|스테이크|족발|닭볶음탕|제육/],
   ['반찬', /무침|나물|조림|볶음|말이|전$|부침|장조림|멸치|어묵|샐러드|잡채/],
 ];
+// 띄어쓰기로만 구분된 재료("물 고춧가루 양조간장 매실액")를 나눌 때 쓰는 재료 사전.
+// 여기 있는 단어(또는 이 단어로 끝나는 말, 예: 양조간장→간장)가 나란히 있으면 따로 나눕니다.
+// 잘 안 나눠지는 재료가 있으면 이 목록에 단어를 추가하세요.
+const KNOWN_INGREDIENTS = `물 소금 설탕 흑설탕 간장 고춧가루 고추장 된장 쌈장 춘장 참기름 들기름 식초 마늘 생강 후추 후춧가루 깨 통깨 참깨
+  양파 대파 쪽파 파 감자 고구마 당근 두부 계란 달걀 매실액 매실청 물엿 올리고당 조청 꿀 맛술 미림 청주 소주 맛간장 굴소스 액젓 새우젓 육수
+  식용유 올리브유 버터 우유 생크림 밀가루 전분 녹말 부침가루 튀김가루 빵가루 청양고추 고추 홍고추 풋고추 꽈리고추 애호박 호박 무 배추 김치
+  버섯 표고버섯 느타리버섯 팽이버섯 새송이 양송이 콩나물 숙주 시금치 부추 깻잎 양배추 상추 오이 가지 브로콜리 파프리카 피망 미나리 쑥갓 연근 우엉 도라지 고사리
+  돼지고기 소고기 쇠고기 닭고기 닭 오리 삼겹살 목살 차돌박이 다짐육 베이컨 햄 스팸 소시지 어묵 맛살 참치 멸치 새우 오징어 낙지 쭈꾸미 조개 바지락 홍합 북어 황태 김 미역 다시마
+  치즈 쌀 찹쌀 밥 떡 당면 소면 라면 레몬 사과 배 대추 잣 호두 땅콩 견과류 물엿 카레가루 케첩 마요네즈 머스타드 와사비 연두 다시다 미원 쯔유`.split(/\s+/).filter(Boolean);
+// 다음 단어와 붙여서 한 재료로 보는 꾸밈말 (예: 다진 마늘, 양조 간장)
+const INGREDIENT_MODIFIERS = '다진 깐 생 신 묵은 국산 냉동 통 굵은 고운 흰 맛 양조 진 국 조선 썬 채썬 마른 말린 건 저염 무염 갈은 빻은 삶은 볶은 구운 데친 불린 손질한 익은 작은 큰'.split(' ');
 const FIREBASE_SDK_VERSION = '10.12.2';
 
 /* ============================== [2] 공통 도구 ============================== */
@@ -389,7 +400,7 @@ function parseIngredient(raw) {
   s = s.replace(KNUM_RE, (m, p, w, u) => `${p}${KNUM[w]}${u}`);
   const v = s.match(VAGUE);
   if (v && v[1].trim()) return { name: v[1].trim(), amount: '', unit: v[2].replace(/\s+/g, ' ') };
-  let m = s.match(ING_STRICT) || s.match(ING_LOOSE);
+  let m = s.match(ING_STRICT) || (/^(약\s*)?\d/.test(s) && s.match(ING_FIRST) ? null : s.match(ING_LOOSE));
   if (m) {
     const name = m[1].replace(/[\s:：]+$/, '').trim();
     const um = m[4].match(/^([^\s(（,]*)\s*(.*)$/);
@@ -403,7 +414,41 @@ function parseIngredient(raw) {
 function looksIngredient(line) {
   const s = line.replace(BULLET, '').trim();
   if (s.length > 45 || isStepLike(s)) return false;
-  return new RegExp(QTY + '\\s*[a-zA-Z가-힣]{0,4}').test(s) || VAGUE.test(s) || s.includes(',');
+  return new RegExp(QTY + '\\s*[a-zA-Z가-힣]{0,4}').test(s) || VAGUE.test(s) || s.includes(',') || expandSpaced(s).length > 1;
+}
+// 띄어쓰기로만 이어진 재료 나누기
+//  "물 고춧가루 양조간장 매실액"      → 물 / 고춧가루 / 양조간장 / 매실액
+//  "물 1컵 고춧가루 2큰술 간장 1큰술" → 양이 붙은 재료마다 나눔
+//  "다진 마늘 1큰술", "돼지고기 앞다리살 600g" → 한 재료로 유지
+const isKnownIng = w => KNOWN_INGREDIENTS.some(k => w === k || (k.length >= 2 && w.endsWith(k)));
+function splitNames(name) {
+  const raw = name.split(/\s+/).filter(Boolean), words = [];
+  for (let i = 0; i < raw.length; i++) {
+    if (INGREDIENT_MODIFIERS.includes(raw[i]) && i + 1 < raw.length) { words.push(raw[i] + ' ' + raw[i + 1]); i++; }
+    else words.push(raw[i]);
+  }
+  if (words.length < 2) return [name];
+  const known = words.filter(w => isKnownIng(w.split(' ').pop())).length;
+  return known === words.length || (words.length >= 3 && known >= words.length - 1) ? words : [name];
+}
+function expandSpaced(item) {
+  const s = item.replace(BULLET, '').replace(KNUM_RE, (m, p, w, u) => `${p}${KNUM[w]}${u}`).replace(/\s+/g, ' ').trim();
+  if (!s || /[(（\[]/.test(s)) return [item];
+  const re = new RegExp(`(?:약간|조금|적당량|적당히|소량|취향껏|${QTY}\\s*[a-zA-Z가-힣]{0,4})(?=\\s|$)`, 'g');
+  const pieces = []; let last = 0, m;
+  while ((m = re.exec(s))) {
+    if (!m[0]) { re.lastIndex++; continue; }
+    const before = s.slice(last, m.index).trim();
+    if (!before) return [item];                       // "300g 돼지고기"처럼 양이 앞에 오면 그대로
+    pieces.push({ name: before, qty: m[0].trim() }); last = re.lastIndex;
+  }
+  const tail = s.slice(last).trim(); if (tail) pieces.push({ name: tail, qty: '' });
+  const out = [];
+  for (const p of pieces) {
+    const names = splitNames(p.name);
+    names.forEach((n, i) => out.push(i === names.length - 1 && p.qty ? `${n} ${p.qty}` : n));
+  }
+  return out.length > 1 ? out : [item];
 }
 function guessCategory(title) { for (const [c, re] of CATEGORY_HINTS) if (re.test(title)) return c; return ''; }
 
@@ -411,7 +456,7 @@ function parseRecipeText(text) {
   const out = { title: '', servings: 0, minutes: 0, ingredients: [], steps: [], tip: [] };
   let section = null, stepsNumbered = false, sawHeader = false;
   const lines = String(text || '').replace(/ /g, ' ').split(/\r?\n/);
-  const pushIng = line => splitItems(line).forEach(it => { const p = parseIngredient(it); if (p && p.name) out.ingredients.push(p); });
+  const pushIng = line => splitItems(line).flatMap(expandSpaced).forEach(it => { const p = parseIngredient(it); if (p && p.name) out.ingredients.push(p); });
   const pushStep = line => {
     const numbered = STEP_NUM.test(line);
     const s = line.replace(STEP_NUM, '').replace(BULLET, '').trim(); if (!s) return;
